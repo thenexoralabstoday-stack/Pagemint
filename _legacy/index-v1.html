@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF Editor</title>
+    <style>
+        :root { --bg: #f6f7f9; --panel: #fff; --border: #e5e7eb; --accent: #2563eb; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, Arial, sans-serif; background: var(--bg); min-height: 100vh; }
+        header { position: sticky; top: 0; z-index: 50; background: var(--panel); border-bottom: 1px solid var(--border); padding: 14px 16px; display: flex; gap: 10px; align-items: center; }
+        .brand { font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+        .brand span { width: 24px; height: 24px; border-radius: 6px; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+        .toolbar { display: flex; gap: 8px; align-items: center; }
+        button, input[type="file"] { font: 500 13px/1.2 inherit; border: 1px solid var(--border); background: #fff; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+        button:hover:not(:disabled) { background: #f3f4f6; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button.active { background: var(--accent); color: #fff; border-color: #1e40af; }
+        #status { padding: 6px 16px; font-size: 13px; color: #6b7280; max-width: 1200px; margin: 0 auto; }
+        main { display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 20px; }
+        .page { position: relative; background: var(--panel); padding: 14px; border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,0.1); }
+        canvas { display: block; background: #fff; border-radius: 6px; max-width: 100%; height: auto; }
+        .text-layer { position: absolute; inset: 14px; z-index: 2; cursor: text; }
+        .text-block {
+            position: absolute; min-width: 20px; min-height: 16px; background: rgba(255,255,255,0.8);
+            border: 1px dashed var(--accent); font: 12px Arial, sans-serif; padding: 1px 3px; outline: none;
+            cursor: move; resize: both; overflow: hidden;
+        }
+        .text-block[contenteditable="true"] { background: rgba(255,255,255,0.95); border-color: #dc2626; cursor: text; }
+        .whiteout-box { position: absolute; background: rgba(255,255,255,0.5); border: 1px dashed #dc2626; cursor: move; min-width: 30px; min-height: 16px; }
+    </style>
+</head>
+<body>
+<header>
+    <div class="brand"><span>P</span> PDF Editor</div>
+    <div class="toolbar">
+        <input type="file" id="fileInput" accept=".pdf" />
+        <button id="saveBtn" disabled>Save PDF</button>
+        <button id="saveImagesBtn" disabled>Save Images</button>
+    </div>
+    <div class="toolbar">
+        <button id="editModeBtn" disabled>Edit Mode: On</button>
+        <button id="eraseBtn" disabled>White-out</button>
+    </div>
+</header>
+<div id="status">Open a PDF to begin. Toggle Edit Mode to make existing text editable.</div>
+<main id="pagesContainer"></main>
+
+<script type="module">
+    import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.0.375/+esm';
+    import { PDFDocument, rgb, StandardFonts } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.0.375/build/pdf.worker.mjs';
+
+    const fileInput = document.getElementById('fileInput');
+    const saveBtn = document.getElementById('saveBtn');
+    const saveImagesBtn = document.getElementById('saveImagesBtn');
+    const editModeBtn = document.getElementById('editModeBtn');
+    const eraseBtn = document.getElementById('eraseBtn');
+    const statusEl = document.getElementById('status');
+    const container = document.getElementById('pagesContainer');
+    let pdfSourceBytes = null;
+    let editMode = false;
+    let whiteoutMode = false;
+    const pages = [];
+
+    function setStatus(msg){ statusEl.textContent = msg || ''; }
+    function toggleButtons(on){ [saveBtn, saveImagesBtn, editModeBtn, eraseBtn].forEach(b => b.disabled = !on); }
+
+    fileInput.addEventListener('change', async e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setStatus('Loading…');
+        const ab = await file.arrayBuffer();
+        if (!ab || ab.byteLength < 100) { alert('Invalid PDF file.'); return; }
+        pdfSourceBytes = ab.slice(0);
+        const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(ab) }).promise;
+        container.innerHTML = ''; pages.length = 0;
+        for (let i = 1; i <= pdfDoc.numPages; i++) await buildPage(pdfDoc, i);
+        toggleButtons(true);
+        setStatus(`Loaded ${file.name}. Toggle Edit Mode to type directly over existing text.`);
+    });
+
+    async function buildPage(pdfDoc, pageNumber){
+        const page = await pdfDoc.getPage(pageNumber);
+        const base = page.getViewport({ scale: 1 });
+        const scale = Math.min(1.5, 780 / Math.max(base.width, base.height, 1));
+        const viewport = page.getViewport({ scale });
+        const el = document.createElement('div');
+        el.className = 'page'; el.dataset.pageNumber = String(pageNumber);
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width; canvas.height = viewport.height;
+        const textLayer = document.createElement('div');
+        textLayer.className = 'text-layer';
+        el.appendChild(canvas); el.appendChild(textLayer);
+        container.appendChild(el);
+        const info = { pageNumber, pdfDoc, page, scaleFactor: viewport.width / base.width, originalHeight: base.height, el, textLayer, whiteouts: [] };
+        pages.push(info);
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        const items = groupTextItems(await extractTextItems(page, viewport));
+        placeTextBlocks(info, items);
+        textLayer.addEventListener('click', ev => {
+            if (whiteoutMode && !ev.target.classList.contains('text-block') && !ev.target.classList.contains('whiteout-box')) {
+                const r = textLayer.getBoundingClientRect();
+                addWhiteout(info, ev.clientX - r.left, ev.clientY - r.top);
+            }
+        });
+    }
+
+    async function extractTextItems(page, viewport){
+        const tc = await page.getTextContent();
+        return tc.items.filter(i => i.str && i.str.trim()).map(item => {
+            const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+            const fs = Math.hypot(tx[0], tx[1]);
+            const width = fs * (item.width || 1);
+            return { str: item.str.trim(), x: tx[4], y: viewport.height - tx[5] - fs, fontSize: fs, width };
+        }).sort((a, b) => a.y - b.y || a.x - b.x);
+    }
+
+    function groupTextItems(items){
+        if (!items.length) return [];
+        items.sort((a, b) => a.y - b.y || a.x - b.x);
+        const lines = [];
+        let currentLine = null;
+        for (const item of items) {
+            if (!currentLine || Math.abs(item.y - currentLine.y) > currentLine.fontSize * 0.5) {
+                currentLine = { y: item.y, fontSize: item.fontSize, items: [item] };
+                lines.push(currentLine);
+            } else {
+                currentLine.items.push(item);
+                currentLine.fontSize = Math.max(currentLine.fontSize, item.fontSize);
+            }
+        }
+        const words = [];
+        for (const line of lines) {
+            line.items.sort((a, b) => a.x - b.x);
+            let current = null;
+            for (const item of line.items) {
+                if (!current) {
+                    current = { str: item.str, x: item.x, y: item.y, fontSize: item.fontSize, width: item.width, items: [item] };
+                    words.push(current);
+                    continue;
+                }
+                const gap = item.x - (current.x + current.width);
+                const threshold = Math.max(current.fontSize, item.fontSize) * 0.35;
+                if (gap <= threshold && gap > -current.width * 0.1) {
+                    current.str += item.str;
+                    current.width = (item.x + item.width) - current.x;
+                    current.fontSize = Math.max(current.fontSize, item.fontSize);
+                    current.items.push(item);
+                } else {
+                    current = { str: item.str, x: item.x, y: item.y, fontSize: item.fontSize, width: item.width, items: [item] };
+                    words.push(current);
+                }
+            }
+        }
+        return words.sort((a, b) => a.y - b.y || a.x - b.x);
+    }
+
+    function placeTextBlocks(info, items){
+        info.textLayer.innerHTML = '';
+        items.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'text-block';
+            div.textContent = item.str;
+            div.style.left = item.x + 'px';
+            div.style.top = Math.max(2, item.y) + 'px';
+            div.style.fontSize = item.fontSize + 'px';
+            div.style.lineHeight = '1.1';
+            div.dataset.fontSize = item.fontSize;
+            div.dataset.x = item.x;
+            div.dataset.y = item.y;
+            div.dataset.original = item.str;
+            div.dataset.originalX = item.x;
+            div.dataset.originalY = item.y;
+            div.dataset.originalW = item.width;
+            info.textLayer.appendChild(div);
+            makeDraggable(info, div);
+        });
+    }
+
+    function makeDraggable(info, el){
+        let startX = 0, startY = 0, startLeft = 0, startTop = 0;
+        el.addEventListener('mousedown', e => {
+            if (editMode) {
+                const rect = el.getBoundingClientRect();
+                const nearBorder = e.clientX < rect.left + 4 || e.clientX > rect.right - 4 || e.clientY < rect.top + 4 || e.clientY > rect.bottom - 4;
+                if (!nearBorder) return;
+            } else if (e.target !== el) {
+                return;
+            }
+            e.preventDefault();
+            startX = e.clientX; startY = e.clientY;
+            startLeft = parseFloat(el.style.left) || 0;
+            startTop = parseFloat(el.style.top) || 0;
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+            function onMove(ev){
+                const dx = ev.clientX - startX;
+                const dy = ev.clientY - startY;
+                el.style.left = (startLeft + dx) + 'px';
+                el.style.top = (startTop + dy) + 'px';
+            }
+            function onUp(){
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                const r = info.textLayer.getBoundingClientRect();
+                const rect = el.getBoundingClientRect();
+                el.dataset.x = (rect.left - r.left) / info.scaleFactor;
+                el.dataset.y = (rect.top - r.top) / info.scaleFactor;
+                if (el.dataset.index != null) {
+                    const idx = Number(el.dataset.index);
+                    if (info.whiteouts[idx]) {
+                        info.whiteouts[idx].x = parseFloat(el.dataset.x);
+                        info.whiteouts[idx].y = parseFloat(el.dataset.y);
+                    }
+                }
+            }
+        });
+    }
+
+    function addWhiteout(info, x, y){
+        const box = document.createElement('div');
+        box.className = 'whiteout-box';
+        box.style.left = (x - 20) + 'px'; box.style.top = (y - 10) + 'px';
+        box.style.width = '40px'; box.style.height = '20px';
+        box.dataset.index = String(info.whiteouts.length);
+        info.textLayer.appendChild(box);
+        info.whiteouts.push({ x: (x - 20) / info.scaleFactor, y: (y - 10) / info.scaleFactor, w: 40 / info.scaleFactor, h: 20 / info.scaleFactor, el: box });
+        makeDraggable(info, box);
+    }
+
+    editModeBtn.addEventListener('click', () => {
+        editMode = !editMode;
+        editModeBtn.textContent = editMode ? 'Edit Mode: On' : 'Edit Mode: Off';
+        document.querySelectorAll('.text-block').forEach(b => b.setAttribute('contenteditable', editMode));
+        setStatus(editMode ? 'Edit Mode ON - click words to edit them.' : 'Edit Mode OFF.');
+    });
+
+    eraseBtn.addEventListener('click', () => {
+        whiteoutMode = !whiteoutMode;
+        eraseBtn.classList.toggle('active', whiteoutMode);
+        setStatus(whiteoutMode ? 'White-out mode ON - click to place white boxes.' : 'White-out mode OFF.');
+    });
+
+    function sanitizeText(str){
+        return (str || '').replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, '?');
+    }
+
+    saveBtn.addEventListener('click', async () => {
+        if (!pdfSourceBytes) return;
+        setStatus('Saving… this may take a moment for large PDFs.');
+        try {
+            const out = await PDFDocument.create();
+            const font = await out.embedFont(StandardFonts.Helvetica);
+            const size = 12;
+            const srcDoc = await PDFDocument.load(pdfSourceBytes);
+            const total = pages.length;
+            for (let i = 0; i < pages.length; i++) {
+                const p = pages[i];
+                const { width, height } = p.page.getViewport({ scale: 1 });
+                const [copiedPage] = await out.copyPages(srcDoc, [p.pageNumber - 1]);
+                const np = out.addPage(copiedPage);
+                p.whiteouts.forEach(b => np.drawRectangle({ x: b.x, y: height - b.y - b.h, width: b.w, height: b.h, color: rgb(1,1,1) }));
+                p.textLayer.querySelectorAll('.text-block').forEach(block => {
+                    const originalText = block.dataset.original || '';
+                    const currentText = sanitizeText(block.textContent);
+                    const currentX = parseFloat(block.dataset.x) / p.scaleFactor;
+                    const currentY = parseFloat(block.dataset.y) / p.scaleFactor;
+                    const originalX = parseFloat(block.dataset.originalX) / p.scaleFactor;
+                    const originalY = parseFloat(block.dataset.originalY) / p.scaleFactor;
+                    const originalW = parseFloat(block.dataset.originalW) / p.scaleFactor;
+                    const fontSize = parseFloat(block.dataset.fontSize) / p.scaleFactor || size;
+                    const moved = Math.abs(currentX - originalX) > 0.5 || Math.abs(currentY - originalY) > 0.5;
+                    const changed = currentText !== originalText || moved;
+                    if (!changed) return;
+                    if (originalText) {
+                        np.drawRectangle({ x: originalX, y: height - originalY - fontSize, width: originalW, height: fontSize, color: rgb(1,1,1) });
+                    }
+                    if (currentText.trim()) {
+                        np.drawText(currentText, { x: currentX, y: height - currentY, size: Math.max(8, fontSize), font, color: rgb(0,0,0) });
+                    }
+                });
+                setStatus(`Saving… page ${i + 1}/${total}`);
+            }
+            const blob = new Blob([await out.save()], { type: 'application/pdf' });
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'edited.pdf'; a.click();
+            setStatus('Saved edited.pdf');
+        } catch (err) {
+            alert('Save failed: ' + err.message);
+            console.error(err);
+            setStatus('Save failed.');
+        }
+    });
+
+    saveImagesBtn.addEventListener('click', async () => {
+        setStatus('Preparing images…');
+        const zip = new JSZip();
+        for (const p of pages) {
+            const pg = await p.pdfDoc.getPage(p.pageNumber);
+            const vp = pg.getViewport({ scale: p.scaleFactor });
+            const c = document.createElement('canvas');
+            c.width = vp.width; c.height = vp.height;
+            await pg.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+            zip.file('page-' + String(p.pageNumber).padStart(3, '0') + '.png', await new Promise(r => c.toBlob(r, 'image/png')));
+        }
+        const a = document.createElement('a'); a.href = URL.createObjectURL(await zip.generateAsync({ type: 'blob' })); a.download = 'pages.zip'; a.click();
+        setStatus('Saved pages.zip');
+    });
+</script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+</body>
+</html>

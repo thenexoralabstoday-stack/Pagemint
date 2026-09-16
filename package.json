@@ -1,0 +1,15 @@
+{
+  "name": "pagemint",
+  "version": "2.0.0",
+  "description": "Pagemint — browser-native PDF editor and toolbox with Stripe billing and AI tools",
+  "private": true,
+  "copyright": "Copyright (c) 2026 Nexora Labs. All rights reserved.",
+  "scripts": {
+    "serve": "python -m http.server 8080",
+    "test": "node test/smoke.test.js",
+    "api": "cd server && npm start"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.0"
+  }
+}

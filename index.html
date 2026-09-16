@@ -1,0 +1,40 @@
+<!-- Copyright (c) 2026 Nexora Labs. All rights reserved. -->
+<!-- Contact: thenexoralabstoday@gmail.com -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pagemint — Every PDF tool. Private by design.</title>
+  <meta name="description" content="Edit, merge, split, compress, sign, redact and convert PDFs right in your browser. Your files never leave your device." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Dancing+Script:wght@600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/app.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0' x2='1' y1='0' y2='1'><stop offset='0' stop-color='%2310b981'/><stop offset='1' stop-color='%236366f1'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23g)'/><text x='50' y='68' font-size='52' font-family='Arial' font-weight='700' text-anchor='middle' fill='white'>P</text></svg>" />
+</head>
+<body>
+  <nav class="nav">
+    <a href="#/" class="logo"><span class="logo-mark">P</span> Pagemint</a>
+    <div class="nav-links">
+    <a href="#/tools" data-nav="tools">All tools</a>
+    <a href="#/tool/editor" data-nav="editor">Editor</a>
+    <a href="#/pricing" data-nav="pricing">Pricing</a>
+    <a href="#/contact" data-nav="contact">Contact</a>
+    <a href="#/account" data-nav="account">Account</a>
+    </div>
+    <div class="nav-right">
+      <span class="plan-chip" id="planChip"><span class="dot"></span><span id="planLabel">Free</span></span>
+      <button class="btn btn-icon btn-ghost" id="themeBtn" title="Toggle theme">◐</button>
+      <a class="btn btn-primary btn-sm" href="#/pricing" id="upgradeBtn">Upgrade</a>
+    </div>
+  </nav>
+
+  <main id="view"></main>
+
+  <div class="toasts" id="toasts"></div>
+  <input type="file" id="hiddenFile" multiple hidden />
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
