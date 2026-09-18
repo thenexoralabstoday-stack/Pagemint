@@ -5,3 +5,6 @@ server/.env
 data/
 *.log
 .DS_Store
+
+# Output written by the smoke test on every run
+test/out/

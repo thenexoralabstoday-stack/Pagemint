@@ -50,7 +50,7 @@ const chat = {
       stageBody.replaceChildren(fileList(ctx, { reorder: false }), thread);
       thread.append(h('div', { class: 'msg ai' }, 'Reading document…'));
       const parts = await extractAllText(files[0].doc); text = parts.map((t, i) => `[Page ${i + 1}]\n${t}`).join('\n\n');
-      thread.replaceChildren(h('div', { class: 'msg ai' }, text.trim() ? `Ready. I read ${files[0].pageCount} pages (${Math.round(text.length / 4).toLocaleString()} tokens). Pick a quick action or ask a question.` : 'This PDF has no text layer. Run OCR first, then come back.'));
+      thread.replaceChildren(h('div', { class: 'msg ai' }, text.trim() ? `Ready. I read ${files[0].pageCount} pages (${Math.round(text.length / 4).toLocaleString()} tokens). Pick a quick action or ask a question.` : 'This PDF has no text layer (it is probably a scan), so the AI tools cannot read it.'));
       send.disabled = !text.trim();
     });
   },

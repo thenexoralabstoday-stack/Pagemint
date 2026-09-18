@@ -2,8 +2,11 @@
 // Contact: thenexoralabstoday@gmail.com
 
 // Pagemint billing / plan gating.
-// Free tier limits are enforced client-side for UX; the server re-checks anything that costs money (AI, OCR queue, storage).
-export const API_BASE = (window.PAGEMINT_API || '').replace(/\/$/, '') || (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'http://localhost:4242' : '');
+// Free tier limits are enforced client-side for UX; the server re-checks anything that costs money (AI).
+export const IS_LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
+// In production the server serves this page, so the API is same-origin. Only a separate
+// local static server (e.g. `npm run serve` on :8080) needs pointing at the API on :4242.
+export const API_BASE = (window.PAGEMINT_API || '').replace(/\/$/, '') || (IS_LOCAL && location.port !== '4242' ? 'http://localhost:4242' : '');
 
 export const PLANS = {
   free:  { id: 'free',  name: 'Free',  tasksPerDay: 3,        maxFileMB: 25,   maxFiles: 3,  ai: false, ocr: false, batch: false },
@@ -12,8 +15,7 @@ export const PLANS = {
 };
 
 export const PRICES = {
-  pro:  { monthly: 9,  yearly: 72,  weekly: 5 },   // yearly = $6/mo
-  team: { monthly: 7,  yearly: 60 },               // per seat, min 3 seats
+  pro: { monthly: 9, yearly: 72, weekly: 5 },   // yearly = $6/mo
 };
 
 const KEY = 'pagemint.session';
@@ -89,6 +91,12 @@ export const billing = {
     const s = session.get();
     if (!s.token) return;
     try { const me = await api('/api/me'); session.set({ ...s, plan: me.plan, expires: me.expires }); } catch { /* offline: keep cached */ }
+  },
+  /** After Stripe Checkout returns, sign in on this device with the email that paid. */
+  async claim(sessionId) {
+    const me = await api('/api/billing/claim', { method: 'POST', body: JSON.stringify({ sessionId }) });
+    session.set({ plan: me.plan, email: me.email, token: me.sessionToken, expires: me.expires });
+    return me;
   },
   async portal() { const { url } = await api('/api/billing/portal', { method: 'POST' }); location.href = url; },
   /** Local dev helper — pretend to be Pro without a server. */

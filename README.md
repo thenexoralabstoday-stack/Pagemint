@@ -9,10 +9,11 @@ Every PDF tool the big sites offer (merge, split, organise, compress, convert, w
 index.html          app shell (landing, tools, pricing, account, workspace)
 css/app.css         design system, light + dark
 js/app.js           router, workspace, plan chip, paywall, file ingest
+js/legal.js         terms, privacy and refund policy text
 js/engine.js        pdf.js (render/text) + pdf-lib (write) wrappers
 js/billing.js       plans, limits, usage counter, API client
 js/tools/*.js       one module per tool family; index.js is the registry
-server/             Express API: magic-link auth, Stripe Checkout + webhooks + portal, Claude AI endpoint
+server/             serves the app + API: magic-link auth, Stripe Checkout + portal, Claude AI endpoint
 test/smoke.test.js  Playwright end-to-end run of every tool
 docs/BUSINESS.md    competitor research, pricing, billing model, growth plan
 docs/IDEAS.md       other sites you can build to earn money
@@ -22,42 +23,54 @@ _legacy/            the v1 single-file editor
 ## Run locally
 
 ```bash
-npm install                # playwright for the tests
-npm run serve              # static site on http://localhost:8080
+cd server && npm install && cd ..
+cp server/.env.example server/.env   # optional: add Stripe / Resend / Claude keys
+node server/index.js                 # app + API on http://localhost:4242
 ```
 
-Optional API (billing + AI):
+Without keys everything except checkout, emailed sign-in links and AI works; sign-in links and contact
+messages are printed to the server log instead. On localhost the Account page shows an
+**Unlock Pro locally (dev)** button for testing Pro features; it never appears on the live site.
 
-```bash
-cd server && npm install
-cp .env.example .env       # fill in Stripe + Claude keys
-npm start                  # http://localhost:4242
-```
+## How it stays up on a free host
 
-The front end talks to `http://localhost:4242` automatically when served from localhost. In production set `window.PAGEMINT_API = 'https://api.yourdomain.com'` before `js/app.js` loads, or serve both from the same origin.
+The server keeps no data of its own, so restarts and redeploys lose nothing:
 
-Without the API everything except checkout, sign-in and AI works. On the Account page there is a **Unlock Pro locally (dev)** button to test Pro features.
+- **Plans come from Stripe.** A customer's plan is looked up from their Stripe subscriptions and
+  7-day-pass payments by email (cached for a minute). There is no local database to lose or drift.
+- **Sign-in is stateless.** Magic links and sessions are HMAC-signed with `SESSION_SECRET`.
+- **One origin.** `server/index.js` serves the app (`index.html`, `css/`, `js/`) and the API together.
+  Nothing else in the repo is served.
 
 ## Tests
 
 ```bash
-npm run serve   # in one terminal
-npm test        # in another: opens every tool with test.pdf, downloads results to test/out, fails on console errors
+cd server && npm test        # plan resolution + token signing (no Stripe account needed)
+node server/index.js         # in one terminal
+BASE=http://localhost:4242 npm test   # in another: every tool with test.pdf, fails on console errors
 ```
 
-## Stripe setup (15 minutes)
+## Stripe setup
 
-1. Create a product **Pagemint Pro** with prices: monthly $9 recurring, yearly $72 recurring, weekly pass $5 one-time.
-2. Create **Pagemint Team** with prices: monthly $7 and yearly $60 per seat (recurring, quantity adjustable).
-3. Copy the `price_...` IDs into `server/.env`.
-4. Enable the Customer Portal in Stripe settings so "Manage billing" works.
-5. Webhook: `stripe listen --forward-to localhost:4242/api/webhook` in dev; in production add an endpoint for `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`.
+1. Create a product **Pagemint Pro** with three prices: $9 monthly (recurring), $72 yearly (recurring),
+   $5 one-time (the 7-day pass).
+2. Put the three `price_...` IDs in `STRIPE_PRICE_PRO_MONTHLY`, `_YEARLY` and `_WEEKLY`.
+3. Enable the **Customer Portal** (Settings -> Billing -> Customer portal) so "Manage billing" works.
+4. Optional webhook for instant cancellations: endpoint `https://<your-app>/api/webhook` with
+   `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`,
+   then set `STRIPE_WEBHOOK_SECRET`. Without it, changes still show up within a minute.
 
-## Deploy
+Teams are sold by email for now: seat management is not built, so there is no Team checkout.
 
-- Static site: Cloudflare Pages, Netlify, Vercel or any bucket. No build step.
-- API: Railway, Render, Fly.io. Replace `server/db.js` with Postgres before you have thousands of users; the interface is three functions.
-- Add per-tool landing pages (`/merge-pdf`, `/compress-pdf`, ...) for SEO. See `docs/BUSINESS.md`.
+## Deploy on Render
+
+1. Render -> New -> Blueprint -> pick this repository. `render.yaml` creates one free web service.
+2. Fill in the secret values it asks for (Stripe keys and prices, Resend, Anthropic).
+   `SESSION_SECRET` is generated for you.
+3. Open `https://<service>.onrender.com/api/health` to check what is configured.
+
+The free plan sleeps after 15 minutes without traffic; the first request after that takes about a minute.
+To email sign-in links to customers, verify a domain in Resend and set `MAIL_FROM` to an address on it.
 
 ## Known limits
 

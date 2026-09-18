@@ -3,7 +3,8 @@
 
 // Pagemint — premium app shell: router, tool registry, workspace, landing, pricing, account.
 import { openPdf, thumbnail, fmtSize } from './engine.js';
-import { PLANS, PRICES, currentPlan, isPro, usageToday, checkAllowed, recordTask, billing, session } from './billing.js';
+import { PLANS, PRICES, IS_LOCAL, currentPlan, isPro, usageToday, checkAllowed, recordTask, billing, session } from './billing.js';
+import { LEGAL } from './legal.js';
 import { TOOLS, CATEGORIES } from './tools/index.js';
 
 const view = document.getElementById('view');
@@ -82,7 +83,7 @@ export function showPaywall(reason) {
   const body = h('div', { class: 'paywall' },
     h('div', { class: 'big' }, '🔒'),
     h('p', {}, reason),
-    h('p', { class: 'small muted' }, 'Pro: unlimited tasks, 500 MB files, batch, OCR and AI tools. Cancel anytime.'),
+    h('p', { class: 'small muted' }, 'Pro: unlimited tasks, 500 MB files, batch processing and AI tools. Cancel anytime.'),
     h('div', { class: 'row', style: { justifyContent: 'center' } },
       h('a', { class: 'btn btn-primary', href: '#/pricing', onclick: () => m.close() }, 'See plans'),
       h('button', { class: 'btn', onclick: () => m.close() }, 'Not now')));
@@ -128,12 +129,11 @@ function renderLanding() {
     h('section', { class: 'section' }, h('h2', {}, 'Why Pagemint'),
       h('div', { class: 'features' },
         feature('🔐', 'Private by design', 'Competitors upload your file to their servers and keep it for hours. Pagemint runs entirely on your device.'),
-        feature('🖊️', 'Real text editing', 'Click any word and retype it. Fonts, sizes and colours are matched automatically.'),
+        feature('🖊️', 'Real text editing', 'Click any line and retype it. Size and colour are matched; the text is re-set in a standard font.'),
         feature('⬛', 'True redaction', 'Redacted areas are rasterised out of the file, not just covered with a box.'),
         feature('🤖', 'AI that reads for you', 'Summarise, extract tables, ask questions across a 300-page contract in seconds.'),
         feature('💸', 'Honest pricing', 'A free tier that is actually useful, a weekly pass for one-off jobs, and no surprise renewals.'),
-        feature('⚡', 'No queue', 'Large files process instantly because there is no server roundtrip.'))),
-    h('footer', {}, `© ${new Date().getFullYear()} Pagemint · Files are processed in your browser and never uploaded.`));
+        feature('⚡', 'No queue', 'Large files process instantly because there is no server roundtrip.'))));
 }
 function feature(ico, title, text) { return h('div', { class: 'feature' }, h('div', { class: 'ico' }, ico), h('h3', {}, title), h('p', {}, text)); }
 
@@ -250,12 +250,12 @@ function renderContact() {
         const message = msgIn.value.trim();
         if (!name || !email || !message) return toast('Please fill all fields', 'err');
         try {
-          const res = await fetch('/api/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, message }) });
-          if (!res.ok) throw new Error('Failed to send');
+          await billing.api('/api/contact', { method: 'POST', body: JSON.stringify({ name, email, message }) });
           toast('Message sent! We will get back to you soon.', 'ok');
           nameIn.value = ''; emailIn.value = ''; msgIn.value = '';
-        } catch (e) { toast(e.message, 'err'); }
-      } }, 'Send message')));
+        } catch (e) { toast(`${e.message}. You can also email ${SUPPORT_EMAIL}.`, 'err'); }
+      } }, 'Send message'),
+      h('p', { class: 'small muted', style: { textAlign: 'center', marginTop: '14px' } }, 'Or email ', h('a', { href: 'mailto:' + SUPPORT_EMAIL, style: { textDecoration: 'underline' } }, SUPPORT_EMAIL))));
   view.replaceChildren(box);
 }
 
@@ -280,7 +280,8 @@ function renderAccount() {
         try { await billing.requestLogin(emailIn.value); toast('Magic link sent. Check your inbox.', 'ok'); }
         catch (e) { toast('Auth server not reachable: ' + e.message, 'err'); }
       } }, 'Send magic link')) : null,
-    h('p', { class: 'small muted', style: { marginTop: '20px' } }, 'Developer? ', h('button', { class: 'btn btn-sm', onclick: () => { billing.devUnlock(); toast('Dev Pro unlocked for 24h', 'ok'); renderAccount(); } }, 'Unlock Pro locally (dev)')));
+    // Development only: never shown on the live site.
+    IS_LOCAL ? h('p', { class: 'small muted', style: { marginTop: '20px' } }, 'Developer? ', h('button', { class: 'btn btn-sm', onclick: () => { billing.devUnlock(); toast('Dev Pro unlocked for 24h', 'ok'); renderAccount(); } }, 'Unlock Pro locally (dev)')) : null);
   view.replaceChildren(box);
 }
 
@@ -291,7 +292,6 @@ function renderPricing() {
   const wrap = h('section', { class: 'section', style: { textAlign: 'center' } });
   function draw() {
     const proPrice = yearly ? (PRICES.pro.yearly / 12).toFixed(0) : PRICES.pro.monthly;
-    const teamPrice = yearly ? (PRICES.team.yearly / 12).toFixed(0) : PRICES.team.monthly;
     wrap.replaceChildren(
       h('h2', {}, 'Simple, honest pricing'),
       h('p', { class: 'lead' }, 'Free for everyday use. Pro when you need more. No dark patterns, cancel in one click.'),
@@ -301,14 +301,19 @@ function renderPricing() {
           h('button', { class: yearly ? 'active' : '', onclick: () => { yearly = true; draw(); } }, 'Yearly')),
         h('span', { class: 'save-pill' }, 'Save 33% yearly')),
       h('div', { class: 'pricing' },
-        priceCard('Free', 0, '', ['3 tasks per day', 'Files up to 25 MB', 'All core tools', 'No watermark, ever', 'no:Batch processing', 'no:OCR and AI tools'], h('a', { class: 'btn', href: '#/tools' }, 'Start free')),
-        priceCard('Pro', proPrice, yearly ? `billed $${PRICES.pro.yearly}/year` : 'billed monthly', ['Unlimited tasks', 'Files up to 500 MB', 'Batch up to 50 files', 'OCR for scanned PDFs', 'AI summarise, chat and extract', 'Priority support'], h('button', { class: 'btn btn-primary', onclick: () => startCheckout('pro', yearly ? 'yearly' : 'monthly') }, 'Go Pro'), true),
-        priceCard('Team', teamPrice, 'per seat · min 3 seats', ['Everything in Pro', 'Central billing and seats', 'Shared signature templates', 'Admin controls and SSO', 'Invoice billing'], h('button', { class: 'btn', onclick: () => startCheckout('team', yearly ? 'yearly' : 'monthly') }, 'Start a team'))),
+        priceCard('Free', 0, '', ['3 tasks per day', 'Files up to 25 MB', 'All core tools', 'No watermark, ever', 'no:Batch processing', 'no:AI tools'], h('a', { class: 'btn', href: '#/tools' }, 'Start free')),
+        priceCard('Pro', proPrice, yearly ? `billed $${PRICES.pro.yearly}/year` : 'billed monthly', ['Unlimited tasks', 'Files up to 500 MB', 'Batch up to 50 files', 'AI summarise, chat and extract', 'Email support'], h('button', { class: 'btn btn-primary', onclick: () => startCheckout('pro', yearly ? 'yearly' : 'monthly') }, 'Go Pro'), true),
+        h('div', { class: 'price-card' },
+          h('div', { class: 'tier' }, 'Teams'),
+          h('div', { class: 'price' }, 'Let’s talk'),
+          h('div', { class: 'small muted' }, 'Pro for 3 or more people'),
+          h('ul', {}, h('li', {}, 'Everything in Pro'), h('li', {}, 'One invoice for the whole team'), h('li', {}, 'Volume pricing')),
+          h('a', { class: 'btn', href: `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Pagemint for teams')}` }, 'Email us'))),
       h('div', { style: { marginTop: '18px' } },
         h('p', { class: 'muted small' }, 'One-off job? ', h('button', { class: 'btn btn-sm', onclick: () => startCheckout('pro', 'weekly') }, `Get a 7-day Pro pass for $${PRICES.pro.weekly}`), ' · does not auto-renew.')),
       h('div', { class: 'faq', style: { textAlign: 'left' } },
-        faq('Do my files get uploaded?', 'No. Every tool except AI and OCR runs completely in your browser. AI tools send only extracted text to our server, never the file itself, and nothing is stored.'),
-        faq('Can I cancel anytime?', 'Yes. Manage or cancel from your account page. Yearly plans are refundable within 14 days.'),
+        faq('Do my files get uploaded?', 'No. Every tool except AI runs completely in your browser. The AI tools send only the extracted text to our server, never the file itself, and nothing is stored after the reply.'),
+        faq('Can I cancel anytime?', 'Yes. Manage or cancel from your account page and you keep Pro until the end of the period you paid for. Yearly plans are refundable within 14 days. See the refund policy for details.'),
         faq('What counts as a task?', 'One download. Editing, previewing and re-running a tool without downloading is free.'),
         faq('Is there a student or non-profit discount?', 'Yes, 50% off Pro. Email us from your institutional address.')));
   }
@@ -327,7 +332,19 @@ function priceCard(tier, price, sub, feats, cta, featured) {
 function faq(q, a) { return h('details', {}, h('summary', {}, q), h('p', {}, a)); }
 async function startCheckout(plan, interval) {
   try { await billing.checkout(plan, interval); }
-  catch (e) { toast('Billing server not reachable: ' + e.message + '. See server/README to run it.', 'err'); }
+  catch (e) { toast('Checkout could not start: ' + e.message, 'err'); }
+}
+
+/* ---------- legal ---------- */
+const SUPPORT_EMAIL = 'thenexoralabstoday@gmail.com';
+function renderLegal(kind) {
+  ensurePremiumGrain();
+  const doc = LEGAL[kind];
+  view.replaceChildren(h('article', { class: 'legal' },
+    h('h1', {}, doc.title),
+    h('p', { class: 'small muted' }, 'Last updated ' + doc.updated),
+    ...doc.sections.map(([heading, ...paras]) => [h('h2', {}, heading), ...paras.map(p => h('p', {}, p))]).flat(),
+    h('p', { class: 'muted' }, 'Questions? Email ', h('a', { href: 'mailto:' + SUPPORT_EMAIL }, SUPPORT_EMAIL), '.')));
 }
 
 /* ---------- router ---------- */
@@ -336,7 +353,13 @@ function route() {
   const hash = location.hash || '#/';
   const params = new URLSearchParams(location.search);
   if (params.get('login')) { billing.completeLogin(params.get('login')).then(() => { toast('Signed in', 'ok'); history.replaceState({}, '', location.pathname + location.hash); }).catch(e => toast(e.message, 'err')); }
-  if (params.get('checkout') === 'success') { toast('Payment received. Welcome to Pro!', 'ok'); billing.refresh(); history.replaceState({}, '', location.pathname + '#/account'); }
+  if (params.get('checkout') === 'success') {
+    const sid = params.get('session_id');
+    history.replaceState({}, '', location.pathname + '#/account');
+    (sid ? billing.claim(sid) : billing.refresh())
+      .then(() => { toast('Payment received. Welcome to Pro!', 'ok'); if (location.hash === '#/account') renderAccount(); })
+      .catch(() => toast('Payment received. Sign in with the email you paid with to unlock Pro.', 'ok'));
+  }
   document.querySelectorAll('[data-nav]').forEach(a => a.classList.toggle('active', hash.startsWith('#/' + a.dataset.nav)));
   if (teardown && !hash.startsWith('#/tool/')) { try { teardown(); } catch {} teardown = null; }
   if (hash === '#/' || hash === '') renderLanding();
@@ -344,6 +367,9 @@ function route() {
   else if (hash === '#/pricing') renderPricing();
   else if (hash === '#/account') renderAccount();
   else if (hash === '#/contact') renderContact();
+  else if (hash === '#/terms') renderLegal('terms');
+  else if (hash === '#/privacy') renderLegal('privacy');
+  else if (hash === '#/refunds') renderLegal('refunds');
   else if (hash.startsWith('#/tool/')) renderWorkspace(hash.slice(7));
   else renderLanding();
   window.scrollTo(0, 0);

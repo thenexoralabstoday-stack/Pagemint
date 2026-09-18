@@ -7,7 +7,8 @@
   "copyright": "Copyright (c) 2026 Nexora Labs. All rights reserved.",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
@@ -15,5 +16,8 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "stripe": "^22.6.2"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
