@@ -252,6 +252,7 @@ app.use('/api', (_, res) => res.status(404).json({ error: 'Not found' }));
    Only the front end is exposed. The server folder, docs, tests and dotfiles are never served. */
 app.use('/css', express.static(path.join(root, 'css'), { maxAge: '1h' }));
 app.use('/js', express.static(path.join(root, 'js'), { maxAge: '1h' }));
+app.use('/assets', express.static(path.join(root, 'assets'), { maxAge: '7d' }));
 app.get(['/', '/index.html'], (_, res) => res.set('Cache-Control', 'no-cache').sendFile(path.join(root, 'index.html')));
 app.use((_, res) => res.status(404).send('Not found'));
 
